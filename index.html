@@ -123,4 +123,55 @@ $('#runtimeNotice').textContent='● Скрипты карты запущены.
 $('#runtimeNotice').classList.add('working');
 renderMission();renderProgress();syncMapQuick();
 
+// Paste-only journal restoration: public website contains no personal workout data.
+(function () {
+  const grid = document.querySelector('#view-backup .grid2');
+  if (!grid || document.getElementById('horizonJournalPaste')) return;
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'horizonJournalPaste';
+  panel.innerHTML = `<h2>Восстановить дневник через код</h2>
+    <p class="sub">Если файлы из ChatGPT не скачиваются: скопируй код дневника из чата, вставь ниже и нажми «Восстановить». Личные записи не отправляются на GitHub — они сохраняются в браузере.</p>
+    <textarea id="horizonRestoreCode" class="field textareafield" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="Вставь сюда код HZJ1:…" style="min-height:100px;max-height:220px;overflow:auto"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn primary" id="horizonRestoreButton" type="button">↳ Восстановить 19 дней</button>
+    <p id="horizonRestoreStatus" class="sub" role="status" aria-live="polite" style="margin-top:10px">Существующие тренировки и полученные ключи сохраняются.</p>`;
+  grid.prepend(panel);
+  const codeBox = document.getElementById('horizonRestoreCode');
+  const status = document.getElementById('horizonRestoreStatus');
+  const button = document.getElementById('horizonRestoreButton');
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    status.textContent = 'Проверка кода…';
+    try {
+      const code = codeBox.value.trim().replace(/\s+/g, '');
+      if (!/^HZJ1:[A-Za-z0-9+/=]{100,16000}$/.test(code)) throw new Error('Код не распознан. Скопируй его целиком из чата.');
+      if (typeof DecompressionStream !== 'function') throw new Error('Этот браузер не поддерживает распаковку кода. Открой сайт в свежем Chrome, Safari или Edge.');
+      const bytes = Uint8Array.from(atob(code.slice(5)), c => c.charCodeAt(0));
+      const plain = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+      if (plain.length > 50000) throw new Error('Код слишком большой');
+      const payload = JSON.parse(plain);
+      if (payload.kind !== 'horizon-journal-v1' || !Array.isArray(payload.logs) || !Array.isArray(payload.measurements) || payload.logs.length < 1 || payload.logs.length > 365 || payload.logs.some(l => !l.id || !l.date || !l.summary)) throw new Error('Неверный формат дневника');
+      if (!confirm(`Восстановить ${payload.logs.length} записей тренировок? Уже добавленные записи и ключи сохранятся.`)) {
+        status.textContent = 'Импорт отменён, ничего не изменилось.';
+        return;
+      }
+      state.logs = [...new Map([...payload.logs, ...state.logs].map(l => [l.id, l])).values()];
+      state.measurements = [...new Map([...payload.measurements, ...(state.measurements || [])].map(m => [m.id, m])).values()];
+      save();
+      renderAll();
+      renderProgress();
+      renderMission();
+      status.textContent = `Готово: восстановлено ${payload.logs.length} записей. Открой вкладку «Дневник».`;
+      toast('Дневник восстановлен!');
+      codeBox.value = '';
+    } catch (error) {
+      status.textContent = 'Ошибка: ' + (error?.message || String(error));
+      toast('Не удалось восстановить дневник');
+    } finally {
+      button.disabled = false;
+    }
+  });
+})();
+
 </script></body></html>
